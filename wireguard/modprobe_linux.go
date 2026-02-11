@@ -15,6 +15,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/gravitl/netclient/ncutils"
 	"github.com/gravitl/netmaker/logger"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -77,6 +78,9 @@ func isTunModuleLoaded() bool {
 }
 
 func isKernelWireGuardPresent() bool {
+	if ncutils.GetWireGuard() == "wireguard-go" {
+		return false
+	}
 	if lazyLoadKernelWireGuard() {
 		return true
 	}

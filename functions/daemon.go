@@ -248,6 +248,12 @@ func startGoRoutines(wg *sync.WaitGroup) context.CancelFunc {
 		}
 	}
 	slog.Info("configuring netmaker wireguard interface")
+	// Re-read server config in case it was updated during STUN/IP detection delay
+	// (netclient join may have written config while we were waiting on STUN timeouts)
+	if err := config.ReadServerConf(); err != nil {
+		slog.Debug("error re-reading server config", "error", err)
+	}
+	config.SetServerCtx()
 	pullresp, _, _, pullErr := Pull(false, true)
 	if pullErr != nil {
 		slog.Error("fail to pull config from server", "error", pullErr.Error())
