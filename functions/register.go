@@ -49,7 +49,7 @@ func Register(token string) error {
 		host = config.Netclient()
 	}
 
-	url := fmt.Sprintf("https://%s/api/v1/host/register/%s", serverData.Server, token)
+	url := fmt.Sprintf(ncutils.GetAPIScheme() + "://%s/api/v1/host/register/%s", serverData.Server, token)
 	headers := make(http.Header)
 	headers.Set("Content-Type", "application/json")
 	respBytes, err := ncutils.SendRequest(http.MethodPost, url, headers, host)
