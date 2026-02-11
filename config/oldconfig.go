@@ -98,7 +98,7 @@ func OldAuthenticate(node *Node, host *Config) (string, error) {
 	}
 	server := GetServer(node.Server)
 	endpoint := httpclient.Endpoint{
-		URL:    "https://" + server.API,
+		URL:    ncutils.GetAPIScheme() + "://" + server.API,
 		Route:  "/api/nodes/adm/" + node.Network + "/authenticate",
 		Method: http.MethodPost,
 		Data:   data,

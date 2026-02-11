@@ -10,6 +10,7 @@ import (
 	"github.com/devilcove/httpclient"
 	"github.com/gravitl/netclient/auth"
 	"github.com/gravitl/netclient/config"
+	"github.com/gravitl/netclient/ncutils"
 	"github.com/gravitl/netmaker/logger"
 	"github.com/gravitl/netmaker/models"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
@@ -101,7 +102,7 @@ func GetNodePeers(node config.Node) ([]wgtypes.PeerConfig, error) {
 		return nil, err
 	}
 	endpoint := httpclient.JSONEndpoint[models.NodeGet, models.ErrorResponse]{
-		URL:           "https://" + server.API,
+		URL:           ncutils.GetAPIScheme() + "://" + server.API,
 		Route:         "/api/nodes/" + node.Network + "/" + node.ID.String(),
 		Method:        http.MethodGet,
 		Authorization: "Bearer " + token,

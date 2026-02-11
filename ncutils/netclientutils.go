@@ -29,6 +29,16 @@ import (
 
 var ifaceName string
 
+// GetAPIScheme returns the HTTP scheme to use for Netmaker API calls.
+// Defaults to "https". Set NETMAKER_API_SCHEME=http for local development
+// environments that don't have TLS certificates.
+func GetAPIScheme() string {
+	if os.Getenv("NETMAKER_API_SCHEME") == "http" {
+		return "http"
+	}
+	return "https"
+}
+
 // MaxNameLength - maximum node name length
 const MaxNameLength = 62
 
@@ -129,7 +139,7 @@ func GetPublicIP(api string) (net.IP, error) {
 	iplist := []string{"https://ifconfig.me", "https://api.ipify.org", "https://ipinfo.io/ip"}
 
 	if api != "" {
-		api = "https://" + api + "/api/getip"
+		api = GetAPIScheme() + "://" + api + "/api/getip"
 		iplist = append([]string{api}, iplist...)
 	}
 

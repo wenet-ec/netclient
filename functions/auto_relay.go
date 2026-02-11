@@ -556,7 +556,7 @@ func autoRelayME(method, serverName, nodeID, peernodeID, relayID string) error {
 		return err
 	}
 	endpoint := httpclient.JSONEndpoint[models.SuccessResponse, models.ErrorResponse]{
-		URL:           "https://" + server.API,
+		URL:           ncutils.GetAPIScheme() + "://" + server.API,
 		Route:         fmt.Sprintf("/api/v1/node/%s/auto_relay_me", nodeID),
 		Method:        method,
 		Data:          models.AutoRelayMeReq{NodeID: peernodeID, AutoRelayGwID: relayID},

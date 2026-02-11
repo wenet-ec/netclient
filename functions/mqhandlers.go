@@ -721,7 +721,7 @@ func getServerBrokerStatus() (bool, error) {
 		return false, errors.New("server is nil")
 	}
 	var status map[string]interface{}
-	url := fmt.Sprintf("https://%s/api/server/status", server.API)
+	url := fmt.Sprintf("%s://%s/api/server/status", ncutils.GetAPIScheme(), server.API)
 	endpoint := httpclient.JSONEndpoint[map[string]interface{}, models.ErrorResponse]{
 		URL:           url,
 		Method:        http.MethodGet,

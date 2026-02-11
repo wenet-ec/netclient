@@ -11,6 +11,7 @@ import (
 	"github.com/gravitl/netclient/auth"
 	"github.com/gravitl/netclient/config"
 	"github.com/gravitl/netclient/daemon"
+	"github.com/gravitl/netclient/ncutils"
 	"github.com/gravitl/netclient/dns"
 	"github.com/gravitl/netclient/wireguard"
 	"github.com/gravitl/netmaker/logger"
@@ -101,7 +102,7 @@ func deleteNodeFromServer(node *config.Node) error {
 		return fmt.Errorf("could not read sever config %w", err)
 	}
 	endpoint := httpclient.Endpoint{
-		URL:    "https://" + server.API,
+		URL:    ncutils.GetAPIScheme() + "://" + server.API,
 		Method: http.MethodDelete,
 		Route:  "/api/nodes/" + node.Network + "/" + node.ID.String(),
 		Headers: []httpclient.Header{

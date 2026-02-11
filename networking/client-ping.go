@@ -162,7 +162,7 @@ func GetPeerInfo() (models.HostPeerInfo, error) {
 		logger.Log(1, "failed to authenticate when publishing metrics", err.Error())
 		return models.HostPeerInfo{}, err
 	}
-	url := fmt.Sprintf("https://%s/api/v1/host/%s/peer_info", server.API, config.Netclient().ID.String())
+	url := fmt.Sprintf("%s://%s/api/v1/host/%s/peer_info", ncutils.GetAPIScheme(), server.API, config.Netclient().ID.String())
 	endpoint := httpclient.JSONEndpoint[models.SuccessResponse, models.ErrorResponse]{
 		URL:           url,
 		Method:        http.MethodGet,

@@ -9,6 +9,7 @@ import (
 	"github.com/gravitl/netclient/auth"
 	"github.com/gravitl/netclient/config"
 	"github.com/gravitl/netclient/daemon"
+	"github.com/gravitl/netclient/ncutils"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
@@ -64,7 +65,7 @@ func LeaveServer(s string) error {
 	if err == nil {
 		id := config.Netclient().ID.String()
 		endpoint := httpclient.Endpoint{
-			URL:           "https://" + server.API,
+			URL:           ncutils.GetAPIScheme() + "://" + server.API,
 			Route:         "/api/hosts/" + id + "?force=true",
 			Method:        http.MethodDelete,
 			Authorization: "Bearer " + token,

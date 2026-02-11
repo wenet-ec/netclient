@@ -11,6 +11,7 @@ import (
 	"github.com/gravitl/netclient/auth"
 	"github.com/gravitl/netclient/config"
 	"github.com/gravitl/netclient/daemon"
+	"github.com/gravitl/netclient/ncutils"
 	"github.com/gravitl/netclient/wireguard"
 	"github.com/gravitl/netmaker/logger"
 	"github.com/gravitl/netmaker/models"
@@ -34,7 +35,7 @@ func Pull(restart bool, resetIfFailedOvered bool) (models.HostPull, bool, bool, 
 		return models.HostPull{}, resetInterface, replacePeers, err
 	}
 	endpoint := httpclient.JSONEndpoint[models.HostPull, models.ErrorResponse]{
-		URL:           "https://" + server.API,
+		URL:           ncutils.GetAPIScheme() + "://" + server.API,
 		Route:         fmt.Sprintf("/api/v1/host?reset_failovered=%v", resetIfFailedOvered),
 		Method:        http.MethodGet,
 		Authorization: "Bearer " + token,

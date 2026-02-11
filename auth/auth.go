@@ -12,6 +12,7 @@ import (
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/gravitl/netclient/config"
 	"github.com/gravitl/netclient/daemon"
+	"github.com/gravitl/netclient/ncutils"
 	"github.com/gravitl/netclient/wireguard"
 	"github.com/gravitl/netmaker/logger"
 	"github.com/gravitl/netmaker/models"
@@ -52,7 +53,7 @@ func Authenticate(server *config.Server, host *config.Config) (string, error) {
 		Password:   host.HostPass,
 	}
 	endpoint := httpclient.Endpoint{
-		URL:    "https://" + server.API,
+		URL:    ncutils.GetAPIScheme() + "://" + server.API,
 		Route:  "/api/hosts/adm/authenticate",
 		Method: http.MethodPost,
 		Data:   data,

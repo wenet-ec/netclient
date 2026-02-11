@@ -51,7 +51,7 @@ func Register(token string) error {
 		host = config.Netclient()
 	}
 	api := httpclient.JSONEndpoint[models.RegisterResponse, models.ErrorResponse]{
-		URL:           "https://" + serverData.Server,
+		URL:           ncutils.GetAPIScheme() + "://" + serverData.Server,
 		Route:         "/api/v1/host/register/" + token,
 		Method:        http.MethodPost,
 		Data:          host,
