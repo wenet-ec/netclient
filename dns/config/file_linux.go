@@ -59,7 +59,7 @@ func (f *fileManager) Configure(iface string, config Config) error {
 	}
 
 	if !f.ownedByUs() {
-		err := os.Rename(resolvconfFile, resolvconfBackupFile)
+		err := copyFile(resolvconfFile, resolvconfBackupFile)
 		if err != nil {
 			return err
 		}
@@ -138,7 +138,22 @@ func (f *fileManager) writeConfig(nameservers []net.IP, searchDomains []string) 
 }
 
 func (f *fileManager) resetConfig() error {
-	return os.Rename(resolvconfBackupFile, resolvconfFile)
+	data, err := os.ReadFile(resolvconfBackupFile)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(resolvconfFile, data, 0644); err != nil {
+		return err
+	}
+	return os.Remove(resolvconfBackupFile)
+}
+
+func copyFile(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, 0644)
 }
 
 func writeConfig(confBytes io.StringWriter, nameservers []net.IP, searchDomains []string) {
