@@ -4,12 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
+	"strings"
+	"time"
 
 	"github.com/gravitl/netclient/cache"
 	"github.com/gravitl/netclient/config"
 	"github.com/gravitl/netclient/ncutils"
 	"github.com/gravitl/netmaker/logger"
-	"golang.org/x/exp/slog"
 	"golang.zx2c4.com/wireguard/wgctrl"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
@@ -98,14 +100,41 @@ func UpdatePeer(p *wgtypes.PeerConfig) error {
 }
 
 func apply(c *wgtypes.Config) error {
-	slog.Debug("applying wireguard config")
+	// IMPORTANT: Update MagicBind peer mappings BEFORE ConfigureDevice.
+	// Peers must be in place before BindUpdate() fires so ParseEndpoint can find them.
+	updateMagicBindPeersFromConfig(c.Peers)
+
 	wg, err := wgctrl.New()
 	if err != nil {
 		return fmt.Errorf("wgctrl %w", err)
 	}
 	defer wg.Close()
 
-	return wg.ConfigureDevice(ncutils.GetInterfaceName(), *c)
+	ifaceName := ncutils.GetInterfaceName()
+
+	// For userspace WireGuard, ConfigureDevice deadlocks in IpcHandle.
+	// Write UAPI commands directly to the socket instead.
+	if os.Getenv("WG_QUICK_USERSPACE_IMPLEMENTATION") == "wireguard-go" {
+		if err = configureViaDirectUAPI(ifaceName, c); err != nil {
+			return err
+		}
+		// wireguard-go calls BindUpdate() during UAPI processing which triggers Close()
+		// but does NOT always follow with Open(). Restore sockets if needed.
+		if currentMagicBind != nil {
+			currentMagicBind.EnsureOpen()
+		}
+		return nil
+	}
+
+	// Kernel WireGuard path
+	return wg.ConfigureDevice(ifaceName, *c)
+}
+
+// updateMagicBindPeersFromConfig is a stub that will be implemented in wireguard_unix.go for userspace WireGuard
+// For kernel WireGuard (or when not using userspace), this is a no-op
+// This takes the peers from config directly, bypassing wgctrl which blocks on userspace WireGuard
+var updateMagicBindPeersFromConfig = func(peers []wgtypes.PeerConfig) {
+	// No-op by default (kernel WireGuard doesn't use MagicBind)
 }
 
 // returns if better endpoint has been calculated for this peer already
@@ -205,4 +234,95 @@ func GetIPNetfromIp(ip net.IP) (ipCidr *net.IPNet) {
 		_, ipCidr, _ = net.ParseCIDR(fmt.Sprintf("%s/128", ipv4.String()))
 	}
 	return
+}
+
+// configureViaDirectUAPI writes UAPI commands directly to the WireGuard socket.
+// This bypasses wgctrl.ConfigureDevice() which deadlocks with userspace WireGuard
+// due to IpcHandle() holding the device lock during BindUpdate.
+func configureViaDirectUAPI(ifaceName string, c *wgtypes.Config) error {
+	socketPath := fmt.Sprintf("/var/run/wireguard/%s.sock", ifaceName)
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		return fmt.Errorf("failed to connect to UAPI socket: %w", err)
+	}
+	defer conn.Close()
+
+	// keyToHex converts a wgtypes.Key (base64) to lowercase hex.
+	// UAPI protocol requires hex-encoded keys.
+	keyToHex := func(key *wgtypes.Key) string {
+		if key == nil {
+			return ""
+		}
+		keyBytes := key[:]
+		hexStr := make([]byte, len(keyBytes)*2)
+		const hexDigits = "0123456789abcdef"
+		for i, b := range keyBytes {
+			hexStr[i*2] = hexDigits[b>>4]
+			hexStr[i*2+1] = hexDigits[b&0xf]
+		}
+		return string(hexStr)
+	}
+
+	// Build UAPI command string.
+	// "set=1\n" must be the first line — IpcHandle() dispatches on it.
+	// Without it, IpcHandle hits the default case and closes immediately (silent rejection).
+	var uapiCmd strings.Builder
+	uapiCmd.WriteString("set=1\n")
+
+	if c.PrivateKey != nil {
+		uapiCmd.WriteString(fmt.Sprintf("private_key=%s\n", keyToHex(c.PrivateKey)))
+	}
+	if c.ListenPort != nil {
+		uapiCmd.WriteString(fmt.Sprintf("listen_port=%d\n", *c.ListenPort))
+	}
+	if c.FirewallMark != nil {
+		uapiCmd.WriteString(fmt.Sprintf("fwmark=%d\n", *c.FirewallMark))
+	}
+	if c.ReplacePeers {
+		uapiCmd.WriteString("replace_peers=true\n")
+	}
+
+	for _, peer := range c.Peers {
+		uapiCmd.WriteString(fmt.Sprintf("public_key=%s\n", keyToHex(&peer.PublicKey)))
+		if peer.Remove {
+			uapiCmd.WriteString("remove=true\n")
+			continue
+		}
+		if peer.PresharedKey != nil && peer.PresharedKey.String() != "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" {
+			uapiCmd.WriteString(fmt.Sprintf("preshared_key=%s\n", keyToHex(peer.PresharedKey)))
+		}
+		if peer.Endpoint != nil {
+			uapiCmd.WriteString(fmt.Sprintf("endpoint=%s\n", peer.Endpoint.String()))
+		}
+		if peer.PersistentKeepaliveInterval != nil {
+			uapiCmd.WriteString(fmt.Sprintf("persistent_keepalive_interval=%d\n", int(peer.PersistentKeepaliveInterval.Seconds())))
+		}
+		if peer.ReplaceAllowedIPs {
+			uapiCmd.WriteString("replace_allowed_ips=true\n")
+		}
+		for _, allowedIP := range peer.AllowedIPs {
+			uapiCmd.WriteString(fmt.Sprintf("allowed_ip=%s\n", allowedIP.String()))
+		}
+	}
+
+	uapiCmdStr := uapiCmd.String()
+	if !strings.HasSuffix(uapiCmdStr, "\n\n") {
+		uapiCmdStr += "\n"
+	}
+
+	if _, err = conn.Write([]byte(uapiCmdStr)); err != nil {
+		return fmt.Errorf("failed to write UAPI command: %w", err)
+	}
+
+	// wireguard-go sends "errno=0\n\n" then stays in the read loop — set deadline to avoid blocking.
+	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	buf := make([]byte, 4096)
+	n, _ := conn.Read(buf)
+	if n > 0 {
+		response := string(buf[:n])
+		if strings.Contains(response, "errno=") && !strings.Contains(response, "errno=0") {
+			return fmt.Errorf("UAPI error: %s", strings.TrimSpace(response))
+		}
+	}
+	return nil
 }
