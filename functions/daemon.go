@@ -155,6 +155,18 @@ func startGoRoutines(wg *sync.WaitGroup) context.CancelFunc {
 	if err := config.ReadServerConf(); err != nil {
 		slog.Warn("error reading server map from disk", "error", err)
 	}
+	if len(config.GetServers()) == 0 {
+		if err := config.RestoreServerConfFromBackup(); err == nil {
+			slog.Info("restored server config from backup after TOCTOU race")
+			_ = config.ReadServerConf()
+		}
+	}
+	if len(config.GetNodes()) == 0 {
+		if err := config.RestoreNodeConfFromBackup(); err == nil {
+			slog.Info("restored node config from backup after TOCTOU race")
+			_ = config.ReadNodeConfig()
+		}
+	}
 	// initialize firewall manager
 	var err error
 	config.FwClose, err = firewall.Init()
@@ -253,6 +265,18 @@ func startGoRoutines(wg *sync.WaitGroup) context.CancelFunc {
 	// (netclient join may have written config while we were waiting on STUN timeouts)
 	if err := config.ReadServerConf(); err != nil {
 		slog.Debug("error re-reading server config", "error", err)
+	}
+	if len(config.GetServers()) == 0 {
+		if err := config.RestoreServerConfFromBackup(); err == nil {
+			slog.Info("restored server config from backup after TOCTOU race")
+			_ = config.ReadServerConf()
+		}
+	}
+	if len(config.GetNodes()) == 0 {
+		if err := config.RestoreNodeConfFromBackup(); err == nil {
+			slog.Info("restored node config from backup after TOCTOU race")
+			_ = config.ReadNodeConfig()
+		}
 	}
 	config.SetServerCtx()
 	pullresp, _, _, pullErr := Pull(false, true)

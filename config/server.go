@@ -3,6 +3,7 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -175,6 +176,22 @@ func DeleteServer(k string) {
 	serverMutex.Lock()
 	defer serverMutex.Unlock()
 	delete(Servers, k)
+}
+
+// RestoreServerConfFromBackup restores servers.json from its .bak file.
+// Used to recover from the TOCTOU race where daemon.Restart() fires mid-WriteJSONAtomic,
+// leaving servers.json missing or empty while servers.json.bak holds the last valid state.
+func RestoreServerConfFromBackup() error {
+	bakFile := filepath.Join(GetNetclientPath(), "servers.json.bak")
+	liveFile := filepath.Join(GetNetclientPath(), "servers.json")
+	data, err := os.ReadFile(bakFile)
+	if err != nil {
+		return fmt.Errorf("no valid backup: %w", err)
+	}
+	if len(data) < 5 || strings.TrimSpace(string(data)) == "{}" {
+		return fmt.Errorf("backup is empty or trivial")
+	}
+	return os.WriteFile(liveFile, data, 0700)
 }
 
 // ConvertServerCfg converts a netmaker ServerConfig to netclient server struct
