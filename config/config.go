@@ -600,9 +600,6 @@ func WriteJSONAtomic(filePath string, data any, lockfile string, perm os.FileMod
 		return fmt.Errorf("failed to close temp file: %w", err)
 	}
 
-	// Remove old backup if it exists
-	_ = os.Remove(backupFile)
-
 	// Backup existing file
 	if _, err := os.Stat(filePath); err == nil {
 		if err := os.Rename(filePath, backupFile); err != nil {

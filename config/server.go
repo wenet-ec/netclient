@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/google/uuid"
@@ -163,6 +165,21 @@ func DeleteServer(k string) {
 	delete(Servers, k)
 }
 
+// RestoreServerConfFromBackup restores servers.json from its .bak file.
+// Used to recover from the TOCTOU race where daemon.Restart() fires mid-WriteJSONAtomic,
+// leaving servers.json missing or empty while servers.json.bak holds the last valid state.
+func RestoreServerConfFromBackup() error {
+	bakFile := filepath.Join(GetNetclientPath(), "servers.json.bak")
+	liveFile := filepath.Join(GetNetclientPath(), "servers.json")
+	data, err := os.ReadFile(bakFile)
+	if err != nil {
+		return fmt.Errorf("no valid backup: %w", err)
+	}
+	if strings.TrimSpace(string(data)) == "{}" || len(data) < 5 {
+		return fmt.Errorf("backup is empty or trivial")
+	}
+	return os.WriteFile(liveFile, data, 0600)
+}
 // UpdateServerConfig updates the in memory server map with values provided from netmaker server
 func UpdateServerConfig(cfg *models.ServerConfig) {
 	serverMutex.Lock()
