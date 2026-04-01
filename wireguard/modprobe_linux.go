@@ -77,6 +77,9 @@ func isTunModuleLoaded() bool {
 }
 
 func isKernelWireGuardPresent() bool {
+	if os.Getenv("WG_QUICK_USERSPACE_IMPLEMENTATION") == "wireguard-go" {
+		return false
+	}
 	if lazyLoadKernelWireGuard() {
 		return true
 	}

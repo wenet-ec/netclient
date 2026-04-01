@@ -1,4 +1,4 @@
-FROM gravitl/go-builder:1.26.0 AS builder
+FROM golang:1.27.4-bookworm AS builder
 WORKDIR /app
 
 COPY . . 

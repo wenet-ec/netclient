@@ -44,9 +44,12 @@ func rawEndpoint(ep conn.Endpoint) conn.Endpoint {
 }
 
 func normalizeReceive(fn conn.ReceiveFunc) conn.ReceiveFunc {
-	return func(buf []byte) (int, conn.Endpoint, error) {
-		n, ep, err := fn(buf)
-		return n, normalizeEndpoint(ep), err
+	return func(packets [][]byte, sizes []int, eps []conn.Endpoint) (int, error) {
+		n, err := fn(packets, sizes, eps)
+		if n > 0 {
+			eps[0] = normalizeEndpoint(eps[0])
+		}
+		return n, err
 	}
 }
 
