@@ -556,7 +556,7 @@ func autoRelayME(method, serverName, nodeID, peernodeID, relayID string) error {
 		return err
 	}
 
-	url := fmt.Sprintf("https://%s/api/v1/node/%s/auto_relay_me", server.API, nodeID)
+	url := fmt.Sprintf(ncutils.GetAPIScheme()+"://%s/api/v1/node/%s/auto_relay_me", server.API, nodeID)
 	headers := make(http.Header)
 	headers.Set("Content-Type", "application/json")
 	headers.Set("Authorization", "Bearer "+token)

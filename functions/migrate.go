@@ -82,7 +82,7 @@ func Migrate() {
 			LegacyNodes: v,
 		}
 
-		url := fmt.Sprintf("https://api.%s/api/v1/nodes/migrate", k)
+		url := fmt.Sprintf(ncutils.GetAPIScheme()+"://api.%s/api/v1/nodes/migrate", k)
 		headers := make(http.Header)
 		headers.Set("Content-Type", "application/json")
 		headers.Set("requestfrom", "node")
