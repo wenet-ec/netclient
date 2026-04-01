@@ -117,7 +117,7 @@ func deleteNodeFromServer(node *config.Node) error {
 	}
 
 	host := config.Netclient()
-	url := fmt.Sprintf("https://%s/api/nodes/%s/%s", server.API, node.Network, node.ID.String())
+	url := fmt.Sprintf(ncutils.GetAPIScheme()+"://%s/api/nodes/%s/%s", server.API, node.Network, node.ID.String())
 	headers := make(http.Header)
 	headers.Set("Content-Type", "application/json")
 	auth.ApplyAPIHeaders(headers, token, host)

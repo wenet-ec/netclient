@@ -50,8 +50,8 @@ func fetchHostPull(resetIfFailedOvered, refresh bool) (models.HostPull, error) {
 		return models.HostPull{}, err
 	}
 
-	url := fmt.Sprintf("%s/api/v1/host?reset_failovered=%v&refresh=%v",
-		config.APIBaseURL(config.NormalizeServerAPI(server.API)), resetIfFailedOvered, refresh)
+	url := fmt.Sprintf(ncutils.GetAPIScheme()+"://%s/api/v1/host?reset_failovered=%v&refresh=%v",
+		server.API, resetIfFailedOvered, refresh)
 	headers := make(http.Header)
 	headers.Set("Content-Type", "application/json")
 	auth.ApplyAPIHeaders(headers, token, config.Netclient())

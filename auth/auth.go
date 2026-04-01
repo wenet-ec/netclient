@@ -199,7 +199,7 @@ func authenticate(server *config.Server, host *config.Config, opts AuthenticateO
 		Password:   host.HostPass,
 	}
 
-	url := fmt.Sprintf("%s/api/hosts/adm/authenticate", config.APIBaseURL(config.NormalizeServerAPI(server.API)))
+	url := fmt.Sprintf(ncutils.GetAPIScheme()+"://%s/api/hosts/adm/authenticate", server.API)
 	headers := make(http.Header)
 	headers.Set("Content-Type", "application/json")
 	headers.Set(scope.HeaderTenantID, host.TenantID)

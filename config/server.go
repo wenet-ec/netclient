@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 
 	"github.com/google/uuid"
+	"github.com/gravitl/netclient/ncutils"
 	"github.com/gravitl/netmaker/models"
 	"golang.org/x/exp/slog"
 )
@@ -276,7 +277,7 @@ func NormalizeServerAPI(id string) string {
 	return id + ":443"
 }
 
-// APIBaseURL returns https://<api> where api is host:port.
+// APIBaseURL returns the configured HTTP scheme and API host:port.
 func APIBaseURL(api string) string {
 	api = strings.TrimSpace(api)
 	api = strings.TrimPrefix(api, "https://")
@@ -284,7 +285,7 @@ func APIBaseURL(api string) string {
 	if api == "" {
 		return ""
 	}
-	return "https://" + api
+	return ncutils.GetAPIScheme() + "://" + api
 }
 
 func stripServerInput(id string) string {

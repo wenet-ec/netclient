@@ -152,8 +152,7 @@ func GetNodePeers(node config.Node) ([]wgtypes.PeerConfig, error) {
 		return nil, err
 	}
 
-	url := fmt.Sprintf("%s/api/nodes/%s/%s",
-		config.APIBaseURL(config.NormalizeServerAPI(server.API)), node.Network, node.ID.String())
+	url := fmt.Sprintf(ncutils.GetAPIScheme()+"://%s/api/nodes/%s/%s", server.API, node.Network, node.ID.String())
 	headers := make(http.Header)
 	headers.Set("Content-Type", "application/json")
 	auth.ApplyAPIHeaders(headers, token, host)
