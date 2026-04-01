@@ -3,9 +3,11 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/gravitl/netclient/ncutils"
 	"github.com/gravitl/netmaker/models"
@@ -126,6 +128,22 @@ func WriteNodeConfig() error {
 		filepath.Join(os.TempDir(), NodeLockfile),
 		0700,
 	)
+}
+
+// RestoreNodeConfFromBackup restores nodes.json from its .bak file.
+// Used to recover from the TOCTOU race where daemon.Restart() fires mid-WriteJSONAtomic,
+// leaving nodes.json missing or empty while nodes.json.bak holds the last valid state.
+func RestoreNodeConfFromBackup() error {
+	bakFile := filepath.Join(GetNetclientPath(), "nodes.json.bak")
+	liveFile := filepath.Join(GetNetclientPath(), "nodes.json")
+	data, err := os.ReadFile(bakFile)
+	if err != nil {
+		return fmt.Errorf("no valid backup: %w", err)
+	}
+	if len(data) < 5 || strings.TrimSpace(string(data)) == "{}" {
+		return fmt.Errorf("backup is empty or trivial")
+	}
+	return os.WriteFile(liveFile, data, 0600)
 }
 
 // ConvertNode accepts a netmaker node struct and converts to the structs used by netclient
