@@ -3,9 +3,11 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/gravitl/netmaker/models"
@@ -127,6 +129,21 @@ func WriteNodeConfig() error {
 	)
 }
 
+// RestoreNodeConfFromBackup restores nodes.json from its .bak file.
+// Used to recover from the TOCTOU race where daemon.Restart() fires mid-WriteJSONAtomic,
+// leaving nodes.json missing or empty while nodes.json.bak holds the last valid state.
+func RestoreNodeConfFromBackup() error {
+	bakFile := filepath.Join(GetNetclientPath(), "nodes.json.bak")
+	liveFile := filepath.Join(GetNetclientPath(), "nodes.json")
+	data, err := os.ReadFile(bakFile)
+	if err != nil {
+		return fmt.Errorf("no valid backup: %w", err)
+	}
+	if strings.TrimSpace(string(data)) == "{}" || len(data) < 5 {
+		return fmt.Errorf("backup is empty or trivial")
+	}
+	return os.WriteFile(liveFile, data, 0600)
+}
 // ToIPNet parses a cidr string and returns a net.IPNet
 func ToIPNet(cidr string) net.IPNet {
 	_, response, err := net.ParseCIDR(cidr)

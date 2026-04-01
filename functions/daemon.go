@@ -182,6 +182,22 @@ func startGoRoutines(wg *sync.WaitGroup) context.CancelFunc {
 	if err := config.ReadServerConf(); err != nil {
 		slog.Warn("error reading server map from disk", "error", err)
 	}
+	if len(config.GetServers()) == 0 {
+		if err := config.RestoreServerConfFromBackup(); err == nil {
+			slog.Info("restored server config from backup after TOCTOU race")
+			_ = config.ReadServerConf()
+		} else {
+			slog.Error("server config empty and backup restore failed — daemon will run without server config until next enrollment or pull", "error", err)
+		}
+	}
+	if len(config.GetNodes()) == 0 {
+		if err := config.RestoreNodeConfFromBackup(); err == nil {
+			slog.Info("restored node config from backup after TOCTOU race")
+			_ = config.ReadNodeConfig()
+		} else {
+			slog.Error("node config empty and backup restore failed — daemon will run without node config until next enrollment or pull", "error", err)
+		}
+	}
 	// initialize firewall manager
 	var err error
 	config.FwClose, err = firewall.Init()
