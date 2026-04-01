@@ -292,13 +292,17 @@ func (b *relayTCPBind) Open(port uint16) ([]conn.ReceiveFunc, uint16, error) {
 	// routine sleeps 1/3s on any other error and exits permanently after 10
 	// consecutive ones, which would silently kill all TCP-uplink ingress for the
 	// lifetime of the device. Bad packets are dropped and accounted instead.
-	recvTCP := func(buf []byte) (int, conn.Endpoint, error) {
+	recvTCP := func(packets [][]byte, sizes []int, eps []conn.Endpoint) (int, error) {
+		if len(packets) == 0 || len(sizes) == 0 || len(eps) == 0 {
+			return 0, net.ErrClosed
+		}
+		buf := packets[0]
 		for {
 			// Use the channel captured at Open — never read b.inbound after Close nils it
 			// (receive on a nil channel blocks forever and freezes Device.Close / wg show).
 			pkt, ok := <-inbound
 			if !ok {
-				return 0, nil, net.ErrClosed
+				return 0, net.ErrClosed
 			}
 			if len(pkt.data) > len(buf) {
 				tcpInOversizeDrops.note("tcp uplink: inbound packet larger than receive buffer, dropping")
@@ -309,7 +313,9 @@ func (b *relayTCPBind) Open(port uint16) ([]conn.ReceiveFunc, uint16, error) {
 				tcpInEndpointDrops.note("tcp uplink: cannot resolve inbound endpoint, dropping")
 				continue
 			}
-			return copy(buf, pkt.data), ep, nil
+			sizes[0] = copy(buf, pkt.data)
+			eps[0] = ep
+			return 1, nil
 		}
 	}
 	return append(fns, recvTCP), actualPort, nil
@@ -345,7 +351,19 @@ func (b *relayTCPBind) SetMark(mark uint32) error {
 	return b.udp.SetMark(mark)
 }
 
-func (b *relayTCPBind) Send(p []byte, ep conn.Endpoint) error {
+func (b *relayTCPBind) Send(bufs [][]byte, ep conn.Endpoint) error {
+	if len(bufs) == 0 {
+		return nil
+	}
+	for _, p := range bufs {
+		if err := b.sendOne(p, ep); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (b *relayTCPBind) sendOne(p []byte, ep conn.Endpoint) error {
 	dst := endpointKey(ep)
 
 	b.mu.RLock()
@@ -378,8 +396,12 @@ func (b *relayTCPBind) Send(p []byte, ep conn.Endpoint) error {
 		}
 	}
 
-	return b.udp.Send(p, rawEndpoint(ep))
+	return b.udp.Send([][]byte{p}, rawEndpoint(ep))
 }
+
+// BatchSize keeps the legacy TCP uplink bind compatible with the modern
+// wireguard-go conn.Bind API. The uplink is intentionally serialized here.
+func (b *relayTCPBind) BatchSize() int { return 1 }
 
 func (b *relayTCPBind) ParseEndpoint(s string) (conn.Endpoint, error) {
 	return b.parseEndpoint(s)

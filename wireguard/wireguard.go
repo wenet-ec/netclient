@@ -4,7 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/gravitl/netclient/cache"
 	"github.com/gravitl/netclient/config"
@@ -245,6 +248,10 @@ func UpdatePeer(p *wgtypes.PeerConfig) error {
 }
 
 func apply(c *wgtypes.Config) error {
+	// Update MagicBind before ConfigureDevice so endpoint parsing can resolve
+	// DERP-only peers without entering the userspace UAPI lock.
+	updateMagicBindPeersFromConfig(c.Peers)
+
 	slog.Debug("applying wireguard config")
 	wg, err := wgctrl.New()
 	if err != nil {
@@ -252,7 +259,94 @@ func apply(c *wgtypes.Config) error {
 	}
 	defer wg.Close()
 
-	return wg.ConfigureDevice(ncutils.GetInterfaceName(), *c)
+	ifaceName := ncutils.GetInterfaceName()
+	if os.Getenv("WG_QUICK_USERSPACE_IMPLEMENTATION") == "wireguard-go" {
+		if err := configureViaDirectUAPI(ifaceName, c); err != nil {
+			return err
+		}
+		if currentMagicBind != nil {
+			currentMagicBind.EnsureOpen()
+		}
+		return nil
+	}
+
+	return wg.ConfigureDevice(ifaceName, *c)
+}
+
+// updateMagicBindPeersFromConfig is a no-op for kernel WireGuard. The
+// userspace implementation is installed by wireguard_unix.go.
+var updateMagicBindPeersFromConfig = func(peers []wgtypes.PeerConfig) {}
+
+// configureViaDirectUAPI avoids wgctrl's userspace deadlock while applying
+// configuration to wireguard-go.
+func configureViaDirectUAPI(ifaceName string, c *wgtypes.Config) error {
+	socketPath := fmt.Sprintf("/var/run/wireguard/%s.sock", ifaceName)
+	uapiConn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		return fmt.Errorf("failed to connect to UAPI socket: %w", err)
+	}
+	defer uapiConn.Close()
+
+	keyToHex := func(k *wgtypes.Key) string {
+		if k == nil {
+			return ""
+		}
+		const digits = "0123456789abcdef"
+		out := make([]byte, len(k)*2)
+		for i, b := range k[:] {
+			out[i*2], out[i*2+1] = digits[b>>4], digits[b&15]
+		}
+		return string(out)
+	}
+
+	var command strings.Builder
+	command.WriteString("set=1\n")
+	if c.PrivateKey != nil {
+		command.WriteString(fmt.Sprintf("private_key=%s\n", keyToHex(c.PrivateKey)))
+	}
+	if c.ListenPort != nil {
+		command.WriteString(fmt.Sprintf("listen_port=%d\n", *c.ListenPort))
+	}
+	if c.FirewallMark != nil {
+		command.WriteString(fmt.Sprintf("fwmark=%d\n", *c.FirewallMark))
+	}
+	if c.ReplacePeers {
+		command.WriteString("replace_peers=true\n")
+	}
+	for _, peer := range c.Peers {
+		command.WriteString(fmt.Sprintf("public_key=%s\n", keyToHex(&peer.PublicKey)))
+		if peer.Remove {
+			command.WriteString("remove=true\n")
+			continue
+		}
+		if peer.PresharedKey != nil && peer.PresharedKey.String() != "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" {
+			command.WriteString(fmt.Sprintf("preshared_key=%s\n", keyToHex(peer.PresharedKey)))
+		}
+		if peer.Endpoint != nil {
+			command.WriteString(fmt.Sprintf("endpoint=%s\n", peer.Endpoint.String()))
+		}
+		if peer.PersistentKeepaliveInterval != nil {
+			command.WriteString(fmt.Sprintf("persistent_keepalive_interval=%d\n", int(peer.PersistentKeepaliveInterval.Seconds())))
+		}
+		if peer.ReplaceAllowedIPs {
+			command.WriteString("replace_allowed_ips=true\n")
+		}
+		for _, allowedIP := range peer.AllowedIPs {
+			command.WriteString(fmt.Sprintf("allowed_ip=%s\n", allowedIP.String()))
+		}
+	}
+	if _, err := uapiConn.Write([]byte(command.String() + "\n")); err != nil {
+		return fmt.Errorf("failed to write UAPI command: %w", err)
+	}
+	_ = uapiConn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	response := make([]byte, 4096)
+	if n, _ := uapiConn.Read(response); n > 0 {
+		result := string(response[:n])
+		if strings.Contains(result, "errno=") && !strings.Contains(result, "errno=0") {
+			return fmt.Errorf("UAPI error: %s", strings.TrimSpace(result))
+		}
+	}
+	return nil
 }
 
 // returns if better endpoint has been calculated for this peer already

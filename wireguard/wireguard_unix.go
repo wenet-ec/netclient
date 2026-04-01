@@ -6,15 +6,18 @@ package wireguard
 import (
 	"fmt"
 	"net"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/gravitl/netclient/config"
+	"github.com/gravitl/netclient/magicsock"
 	"golang.org/x/exp/slog"
 	"golang.zx2c4.com/wireguard/conn"
 	"golang.zx2c4.com/wireguard/device"
 	"golang.zx2c4.com/wireguard/tun"
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
 // == private ==
@@ -22,6 +25,15 @@ import (
 var tunDevice *device.Device
 var wg sync.WaitGroup
 var uapi net.Listener
+
+// currentMagicBind is updated while the userspace WireGuard device is live.
+// It lets peer configuration bypass wgctrl, which can deadlock against the
+// userspace WireGuard UAPI socket.
+var currentMagicBind *magicsock.MagicBind
+
+func init() {
+	updateMagicBindPeersFromConfig = updateMagicBindPeersFromConfigImpl
+}
 
 // userspaceWGActive is true while a userspace Device from createUserSpaceWG is live.
 // Close must consult this — not relayTCPUserspaceNeeded() — because disable flips the
@@ -57,6 +69,7 @@ func (nc *NCIface) createUserSpaceWG() error {
 	}
 	nc.Iface = tunIface
 	var bind conn.Bind
+	currentMagicBind = nil
 	if relayTCPUserspaceNeeded() {
 		rb := newRelayTCPBind(conn.NewDefaultBind())
 		relayBindMu.Lock()
@@ -68,6 +81,18 @@ func (nc *NCIface) createUserSpaceWG() error {
 		relayBind = nil
 		relayBindMu.Unlock()
 		bind = conn.NewDefaultBind()
+	}
+	if !nc.IsTestIface && os.Getenv("DERP_ENABLED") != "false" && !relayTCPUserspaceNeeded() {
+		magicBind, bindErr := magicsock.NewMagicBind(config.Netclient().PrivateKey)
+		if bindErr != nil {
+			slog.Warn("MagicBind creation failed, falling back to standard bind", "error", bindErr)
+		} else {
+			bind = magicBind
+			currentMagicBind = magicBind
+			slog.Info("MagicBind ready", "interface", nc.Name)
+		}
+	} else if nc.IsTestIface || os.Getenv("DERP_ENABLED") == "false" {
+		currentMagicBind = nil
 	}
 	tunDevice = device.NewDevice(tunIface, bind, device.NewLogger(device.LogLevelSilent, "[netclient] "))
 	err = tunDevice.Up()
@@ -109,6 +134,24 @@ func (nc *NCIface) createUserSpaceWG() error {
 		}
 	}()
 	return nil
+}
+
+// updateMagicBindPeersFromConfigImpl updates MagicBind's peer mapping before
+// ConfigureDevice runs. This avoids wgctrl's userspace UAPI deadlock and gives
+// DERP-only peers their loopback marker endpoint.
+func updateMagicBindPeersFromConfigImpl(peers []wgtypes.PeerConfig) {
+	if currentMagicBind == nil {
+		return
+	}
+
+	derpEndpoints := currentMagicBind.UpdatePeersFromConfig(peers)
+	for i := range peers {
+		if peers[i].Endpoint == nil && !peers[i].Remove {
+			if endpoint, ok := derpEndpoints[peers[i].PublicKey.String()]; ok {
+				peers[i].Endpoint = endpoint
+			}
+		}
+	}
 }
 
 func (nc *NCIface) closeUserspaceWg() error {
