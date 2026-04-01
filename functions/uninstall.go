@@ -110,7 +110,7 @@ func deleteNodeFromServer(node *config.Node) error {
 		return fmt.Errorf("unable to authenticate %w", err)
 	}
 
-	url := fmt.Sprintf("https://%s/api/nodes/%s/%s", server.API, node.Network, node.ID.String())
+	url := fmt.Sprintf(ncutils.GetAPIScheme()+"://%s/api/nodes/%s/%s", server.API, node.Network, node.ID.String())
 	headers := make(http.Header)
 	headers.Set("Content-Type", "application/json")
 	headers.Set("Authorization", "Bearer "+token)

@@ -770,7 +770,7 @@ func getServerBrokerStatus() (bool, error) {
 		return false, errors.New("server is nil")
 	}
 
-	url := fmt.Sprintf("https://%s/api/server/status", server.API)
+	url := fmt.Sprintf(ncutils.GetAPIScheme()+"://%s/api/server/status", server.API)
 	headers := make(http.Header)
 	headers.Set("Content-Type", "application/json")
 	headers.Set(scope.HeaderTenantID, config.Netclient().TenantID)

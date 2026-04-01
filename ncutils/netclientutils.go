@@ -24,6 +24,16 @@ import (
 
 var ifaceName string
 
+// GetAPIScheme returns the HTTP scheme to use for Netmaker API calls.
+// Defaults to "https". Set NETMAKER_API_SCHEME=http for local development
+// environments that don't have TLS certificates.
+func GetAPIScheme() string {
+	if os.Getenv("NETMAKER_API_SCHEME") == "http" {
+		return "http"
+	}
+	return "https"
+}
+
 // NetclientDefaultPort - default port
 const NetclientDefaultPort = 51821
 

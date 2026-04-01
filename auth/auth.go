@@ -53,7 +53,7 @@ func Authenticate(server *config.Server, host *config.Config) (string, error) {
 		Password:   host.HostPass,
 	}
 
-	url := fmt.Sprintf("https://%s/api/hosts/adm/authenticate", server.API)
+	url := fmt.Sprintf(ncutils.GetAPIScheme()+"://%s/api/hosts/adm/authenticate", server.API)
 	headers := make(http.Header)
 	headers.Set("Content-Type", "application/json")
 	headers.Set(scope.HeaderTenantID, host.TenantID)
