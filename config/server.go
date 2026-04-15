@@ -7,13 +7,13 @@ import (
 	"path/filepath"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/google/uuid"
 	"github.com/gravitl/netmaker/models"
-	"github.com/sasha-s/go-deadlock"
 )
 
-var serverMutex = &deadlock.RWMutex{}
+var serverMutex sync.RWMutex
 
 var serverCtxFile = ".serverctx"
 

@@ -8,13 +8,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/gravitl/netclient/ncutils"
 	"github.com/gravitl/netmaker/models"
-	"github.com/sasha-s/go-deadlock"
 )
 
-var nodeMutex = &deadlock.RWMutex{}
+var nodeMutex sync.RWMutex
 
 // NodeMap is an in memory map of the all nodes indexed by network name
 type NodeMap map[string]Node
