@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -70,19 +71,27 @@ func (nc *NCIface) createUserSpaceWG() error {
 	nc.Iface = tunIface
 	var bind conn.Bind
 	currentMagicBind = nil
+	isTestInterface := nc.IsTestIface || strings.HasPrefix(nc.Name, "nmt-") || nc.Name == "utun70"
+	derpDisabled := os.Getenv("DERP_ENABLED") == "false"
+
 	if relayTCPUserspaceNeeded() {
 		rb := newRelayTCPBind(conn.NewDefaultBind())
 		relayBindMu.Lock()
 		relayBind = rb
 		relayBindMu.Unlock()
 		bind = rb
+	} else if isTestInterface || derpDisabled {
+		if derpDisabled && !isTestInterface {
+			slog.Info("DERP disabled via DERP_ENABLED=false, using standard bind", "interface", nc.Name)
+		}
+		bind = conn.NewDefaultBind()
 	} else {
 		relayBindMu.Lock()
 		relayBind = nil
 		relayBindMu.Unlock()
 		bind = conn.NewDefaultBind()
 	}
-	if !nc.IsTestIface && os.Getenv("DERP_ENABLED") != "false" && !relayTCPUserspaceNeeded() {
+	if !isTestInterface && !derpDisabled && !relayTCPUserspaceNeeded() {
 		magicBind, bindErr := magicsock.NewMagicBind(config.Netclient().PrivateKey)
 		if bindErr != nil {
 			slog.Warn("MagicBind creation failed, falling back to standard bind", "error", bindErr)
@@ -91,8 +100,6 @@ func (nc *NCIface) createUserSpaceWG() error {
 			currentMagicBind = magicBind
 			slog.Info("MagicBind ready", "interface", nc.Name)
 		}
-	} else if nc.IsTestIface || os.Getenv("DERP_ENABLED") == "false" {
-		currentMagicBind = nil
 	}
 	tunDevice = device.NewDevice(tunIface, bind, device.NewLogger(device.LogLevelSilent, "[netclient] "))
 	err = tunDevice.Up()
