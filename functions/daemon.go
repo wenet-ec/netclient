@@ -75,12 +75,17 @@ func Daemon() {
 	signal.Notify(quit, syscall.SIGTERM, os.Interrupt)
 	signal.Notify(reset, syscall.SIGHUP)
 
+	daemonStartTime := time.Now()
+	lastCycleTime := daemonStartTime
 	cancel := startGoRoutines(&wg)
 
 	for {
 		select {
-		case <-quit:
-			slog.Info("shutting down netclient daemon")
+		case sig := <-quit:
+			logger.Log(0, fmt.Sprintf("received %s — beginning shutdown (uptime=%s, since_last_cycle=%s)",
+				sig, time.Since(daemonStartTime).Round(time.Millisecond),
+				time.Since(lastCycleTime).Round(time.Millisecond)))
+			logSignalForensics(sig)
 			dns.GetDNSServerInstance().Stop()
 			_ = flow.GetManager().Stop()
 			//check if it needs to restore the default gateway
@@ -89,10 +94,13 @@ func Daemon() {
 				cancel,
 			}, &wg)
 			config.FwClose()
-			slog.Info("shutdown complete")
+			logger.Log(0, "shutdown complete — daemon exiting")
 			return
-		case <-reset:
-			slog.Info("received reset")
+		case sig := <-reset:
+			logger.Log(0, fmt.Sprintf("received %s — beginning reset (uptime=%s, since_last_cycle=%s)",
+				sig, time.Since(daemonStartTime).Round(time.Millisecond),
+				time.Since(lastCycleTime).Round(time.Millisecond)))
+			logSignalForensics(sig)
 			dns.GetDNSServerInstance().Stop()
 			_ = flow.GetManager().Stop()
 			config.FwClose()
@@ -101,10 +109,120 @@ func Daemon() {
 			closeRoutines([]context.CancelFunc{
 				cancel,
 			}, &wg)
-			slog.Info("resetting daemon")
+			logger.Log(0, "resetting daemon — spawning new startGoRoutines cycle")
 			cancel = startGoRoutines(&wg)
+			lastCycleTime = time.Now()
 		}
 	}
+}
+
+// logSignalForensics writes a snapshot of surrounding process state when a
+// signal lands on the daemon loop. Goal: identify who delivered the signal.
+//
+// Go's os/signal does not expose siginfo_t (sender PID/UID). On Linux,
+// signalfd(2) could in principle capture siginfo, but it requires blocking
+// the signal process-wide with PthreadSigmask — which in Go's M:N threading
+// model is unreliable (see golang/go#20479). Instead we capture a best-effort
+// snapshot: our own ppid, any tracer, and a minimal enumeration of live
+// processes at the moment the signal was handled. The sender is usually
+// still alive and will appear in the enumeration.
+func logSignalForensics(sig os.Signal) {
+	ppid := os.Getppid()
+	tracer := readTracerPid()
+	logger.Log(0, fmt.Sprintf("signal forensics: sig=%s self_pid=%d ppid=%d tracer_pid=%d",
+		sig, os.Getpid(), ppid, tracer))
+
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		logger.Log(0, fmt.Sprintf("signal forensics: /proc read failed: %v", err))
+		return
+	}
+	type procInfo struct {
+		pid    int
+		ppid   int
+		state  string
+		comm   string
+	}
+	var procs []procInfo
+	for _, e := range entries {
+		name := e.Name()
+		if len(name) == 0 || name[0] < '0' || name[0] > '9' {
+			continue
+		}
+		pid := 0
+		for _, c := range name {
+			if c < '0' || c > '9' {
+				pid = -1
+				break
+			}
+			pid = pid*10 + int(c-'0')
+		}
+		if pid <= 0 {
+			continue
+		}
+		data, err := os.ReadFile("/proc/" + name + "/stat")
+		if err != nil {
+			continue
+		}
+		// /proc/PID/stat format: pid (comm) state ppid ...
+		// comm may contain spaces and parens; scan for last ')' to delimit.
+		s := string(data)
+		lp := -1
+		for i := len(s) - 1; i >= 0; i-- {
+			if s[i] == ')' {
+				lp = i
+				break
+			}
+		}
+		if lp < 0 {
+			continue
+		}
+		commStart := -1
+		for i := 0; i < len(s); i++ {
+			if s[i] == '(' {
+				commStart = i + 1
+				break
+			}
+		}
+		if commStart < 0 || commStart > lp {
+			continue
+		}
+		comm := s[commStart:lp]
+		rest := s[lp+1:]
+		var state string
+		var ppid2 int
+		fmt.Sscanf(rest, " %s %d", &state, &ppid2)
+		procs = append(procs, procInfo{pid: pid, ppid: ppid2, state: state, comm: comm})
+	}
+	for _, p := range procs {
+		logger.Log(0, fmt.Sprintf("signal forensics: proc pid=%d ppid=%d state=%s comm=%q",
+			p.pid, p.ppid, p.state, p.comm))
+	}
+}
+
+func readTracerPid() int {
+	data, err := os.ReadFile("/proc/self/status")
+	if err != nil {
+		return -1
+	}
+	s := string(data)
+	needle := "TracerPid:\t"
+	i := 0
+	for i = 0; i+len(needle) < len(s); i++ {
+		if s[i:i+len(needle)] == needle {
+			break
+		}
+	}
+	if i+len(needle) >= len(s) {
+		return -1
+	}
+	j := i + len(needle)
+	v := 0
+	for j < len(s) && s[j] >= '0' && s[j] <= '9' {
+		v = v*10 + int(s[j]-'0')
+		j++
+	}
+	return v
 }
 
 // checkAndRestoreDefaultGateway -check if it needs to restore the default gateway
