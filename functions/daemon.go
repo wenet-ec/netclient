@@ -334,6 +334,7 @@ func startGoRoutines(wg *sync.WaitGroup) context.CancelFunc {
 	}
 	server = config.GetServer(config.CurrServer)
 	if server == nil {
+		logger.Log(0, "startGoRoutines: early return — no server config after peers applied; daemon will have no message queue / checkin / iface metrics / DNS until next enrollment or successful pull")
 		return cancel
 	}
 	logger.Log(1, "started daemon for server ", server.Name)
