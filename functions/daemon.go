@@ -129,13 +129,22 @@ func checkAndRestoreDefaultGateway() {
 }
 
 func closeRoutines(closers []context.CancelFunc, wg *sync.WaitGroup) {
+	// Breadcrumbs around every step that could hang during SIGHUP teardown.
+	// If the daemon gets stuck here during a reset and never produces the
+	// startGoRoutines breadcrumbs below, the last line that DID appear tells
+	// us exactly which step is hung. Kept at Info so they appear in default
+	// log verbosity without having to bump to debug.
+	logger.Log(0, fmt.Sprintf("closeRoutines: cancelling goroutine contexts (count=%d)", len(closers)))
 	for i := range closers {
 		closers[i]()
 	}
 	if Mqclient != nil {
+		logger.Log(0, "closeRoutines: disconnecting MQTT client")
 		Mqclient.Disconnect(250)
 	}
+	logger.Log(0, "closeRoutines: waiting for goroutines to exit")
 	wg.Wait()
+	logger.Log(0, "closeRoutines: goroutines exited, clearing caches")
 	// clear cache
 	auth.CleanJwtToken()
 	networking.ClearPeerInfoCache()
@@ -146,17 +155,24 @@ func closeRoutines(closers []context.CancelFunc, wg *sync.WaitGroup) {
 	slog.Info("closing netmaker interface")
 	iface := wireguard.GetInterface()
 	iface.Close()
+	logger.Log(0, "closeRoutines: interface closed, teardown complete")
 }
 
 // startGoRoutines starts the daemon goroutines
 func startGoRoutines(wg *sync.WaitGroup) context.CancelFunc {
+	// Breadcrumbs around every step. See closeRoutines comment above — same
+	// rationale. These are paired with the teardown breadcrumbs so a stalled
+	// restart cycle shows up as a specific last-line in the log.
+	logger.Log(0, "startGoRoutines: beginning daemon restart cycle")
 	ctx, cancel := context.WithCancel(context.Background())
+	logger.Log(0, "startGoRoutines: reading netclient config")
 	if _, err := config.ReadNetclientConfig(); err != nil {
 		slog.Warn("error reading netclient config file", "error", err)
 	}
 
 	config.UpdateNetclient(*config.Netclient())
 	ncutils.SetInterfaceName(config.Netclient().Interface)
+	logger.Log(0, "startGoRoutines: reading server config")
 	if err := config.ReadServerConf(); err != nil {
 		slog.Warn("error reading server map from disk", "error", err)
 	}
@@ -177,11 +193,13 @@ func startGoRoutines(wg *sync.WaitGroup) context.CancelFunc {
 		}
 	}
 	// initialize firewall manager
+	logger.Log(0, "startGoRoutines: initializing firewall")
 	var err error
 	config.FwClose, err = firewall.Init()
 	if err != nil {
 		slog.Info("failed to intialize firewall: ", "error", err.Error())
 	}
+	logger.Log(0, "startGoRoutines: firewall initialized")
 	updateConfig := false
 
 	config.SetServerCtx()
@@ -192,6 +210,7 @@ func startGoRoutines(wg *sync.WaitGroup) context.CancelFunc {
 		server.StunServers = ""
 	}
 
+	logger.Log(0, "startGoRoutines: loading STUN servers")
 	if server.Stun && server.StunServers != "" {
 		stun.LoadStunServers(server.StunServers)
 	} else {
@@ -199,6 +218,7 @@ func startGoRoutines(wg *sync.WaitGroup) context.CancelFunc {
 	}
 	netclientCfg := config.Netclient()
 
+	logger.Log(0, "startGoRoutines: initializing DNS manager")
 	err = dns.Init()
 	if err != nil {
 		logger.Log(0, "error initializing dns manager:", err.Error())
@@ -207,9 +227,12 @@ func startGoRoutines(wg *sync.WaitGroup) context.CancelFunc {
 	var pullresp models.HostPull
 	var pullErr error
 	if server != nil && server.API != "" {
+		logger.Log(0, "startGoRoutines: pulling config from server")
 		pullresp, _, _, pullErr = Pull(false, true)
 		if pullErr != nil {
 			slog.Error("fail to pull config from server", "error", pullErr.Error())
+		} else {
+			logger.Log(0, "startGoRoutines: pull from server complete")
 		}
 	}
 
@@ -229,6 +252,7 @@ func startGoRoutines(wg *sync.WaitGroup) context.CancelFunc {
 
 	if !netclientCfg.IsStatic {
 		// IPV4
+		logger.Log(0, "startGoRoutines: hole-punching WG public port (IPv4 STUN)")
 		config.HostPublicIP, config.WgPublicListenPort, config.HostNatType = holePunchWgPort(4, netclientCfg.ListenPort)
 		slog.Info("wireguard public listen port: ", "port", config.WgPublicListenPort)
 		if config.HostPublicIP != nil && !config.HostPublicIP.IsUnspecified() {
@@ -246,6 +270,7 @@ func startGoRoutines(wg *sync.WaitGroup) context.CancelFunc {
 			updateConfig = true
 		}
 		// IPV6
+		logger.Log(0, "startGoRoutines: hole-punching WG public port (IPv6 STUN)")
 		publicIP6, wgport, natType := holePunchWgPort(6, netclientCfg.ListenPort)
 		if publicIP6 != nil && !publicIP6.IsUnspecified() {
 			netclientCfg.EndpointIPv6 = publicIP6
@@ -282,14 +307,18 @@ func startGoRoutines(wg *sync.WaitGroup) context.CancelFunc {
 		}
 	}
 
+	logger.Log(0, "startGoRoutines: creating netclient interface")
 	nc := wireguard.NewNCIface(netclientCfg, config.GetNodes())
 	if err := nc.Create(); err != nil {
 		slog.Error("error creating netclient interface", "error", err)
 	}
+	logger.Log(0, "startGoRoutines: configuring netclient interface")
 	if err := nc.Configure(); err != nil {
 		slog.Error("error configuring netclient interface", "error", err)
 	}
+	logger.Log(0, "startGoRoutines: applying peer configuration")
 	wireguard.SetPeers(true)
+	logger.Log(0, "startGoRoutines: peers applied")
 	if len(pullresp.EgressRoutes) > 0 {
 		wireguard.SetEgressRoutes(pullresp.EgressRoutes)
 		wireguard.SetEgressRoutesInCache(pullresp.EgressRoutes)
@@ -339,6 +368,7 @@ func startGoRoutines(wg *sync.WaitGroup) context.CancelFunc {
 		}
 	}
 
+	logger.Log(0, "startGoRoutines: spawning message queue + checkin + iface metrics goroutines")
 	wg.Add(1)
 	go messageQueue(ctx, wg, server)
 	wg.Add(1)
@@ -358,6 +388,7 @@ func startGoRoutines(wg *sync.WaitGroup) context.CancelFunc {
 
 	if server.ManageDNS {
 		if dns.GetDNSServerInstance().AddrStr == "" {
+			logger.Log(0, "startGoRoutines: starting DNS listener")
 			dns.GetDNSServerInstance().Start()
 		}
 	} else {
@@ -368,6 +399,7 @@ func startGoRoutines(wg *sync.WaitGroup) context.CancelFunc {
 		callPublishMetrics(true)
 	}()
 	go handleFwUpdate(server.Server, &pullresp.FwUpdate)
+	logger.Log(0, "startGoRoutines: daemon restart cycle complete")
 	return cancel
 }
 
