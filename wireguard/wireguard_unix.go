@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -71,8 +72,10 @@ func (nc *NCIface) createUserSpaceWG() error {
 
 	var bind conn.Bind
 
-	// Skip DERP for test interfaces or when explicitly disabled via DERP_ENABLED=false
-	isTestInterface := nc.Name == "netmaker-test" || nc.Name == "utun70"
+	// Skip DERP for test interfaces or when explicitly disabled via DERP_ENABLED=false.
+	// Test interface names are "nmt-<pid-hex>" (Linux/FreeBSD, see cmd/root.go —
+	// 12 chars, stays under Linux IFNAMSIZ=16) or "utun70" (darwin). Match by prefix.
+	isTestInterface := strings.HasPrefix(nc.Name, "nmt-") || nc.Name == "utun70"
 	derpDisabled := os.Getenv("DERP_ENABLED") == "false"
 
 	if isTestInterface || derpDisabled {

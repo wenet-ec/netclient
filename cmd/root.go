@@ -6,6 +6,7 @@ package cmd
 
 import (
 	"crypto/rand"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -66,7 +67,25 @@ func initConfig() {
 	flags.BindPFlags(rootCmd.Flags())
 	InitConfig(flags)
 	nc := wireguard.NewNCIface(config.Netclient(), config.GetNodes())
-	nc.Name = "netmaker-test"
+	// Per-PID test interface name. The smoke-test below creates a throwaway
+	// wireguard interface to verify the kernel / userspace stack works, and
+	// runs on every netclient CLI invocation (cobra.OnInitialize). A fixed
+	// "netmaker-test" name collides on /run/wireguard/<name>.sock when two
+	// netclient processes run concurrently — e.g. admin's Quantum scheduler
+	// firing several jobs at the same cron boundary, where one spawns
+	// `netclient pull` while another is mid-init. The colliding process
+	// aborts with "unix socket in use". Per-PID naming isolates each smoke
+	// test to its own socket path; each process cleans up its own socket
+	// on nc.Close() and leaves stale sockets on crash which the next
+	// invocation with the same PID (rare) would clean up via UAPIOpen's
+	// own Dial-probe-and-remove fallback.
+	//
+	// Linux IFNAMSIZ is 16 bytes (15 chars + NUL), so the name must stay
+	// short. "nmt-" (4 chars) + 8 hex chars from the PID = 12 chars total,
+	// well under the limit. PIDs larger than 2^32 collapse into the hex
+	// space; PID collisions across concurrent processes are impossible
+	// (PIDs are unique while alive), so 8 hex is sufficient.
+	nc.Name = fmt.Sprintf("nmt-%08x", uint32(os.Getpid()))
 	port := 0
 	nc.Config.ListenPort = &port
 	if runtime.GOOS == "darwin" {
